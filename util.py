@@ -25,6 +25,7 @@ async def send_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: st
     text = text.encode('utf16', errors='surrogatepass').decode('utf16')
     return await context.bot.send_message(chat_id=update.effective_chat.id, text=text, parse_mode=ParseMode.MARKDOWN)
 
+
 # надсилає в чат html-повідомлення
 async def send_html(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> Message:
     text = text.encode('utf16', errors='surrogatepass').decode('utf16')
@@ -50,19 +51,6 @@ async def send_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         raise ValueError("Немає повідомлення, куди можна відповісти.")
 
-# async def send_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, buttons: dict) -> Message:
-#     if not isinstance(text, str):
-#         text = str(text)  # гарантуємо, що це рядок
-#
-#     # Можеш прибрати кодування, якщо воно не критичне
-#     # text = text.encode('utf16', errors='surrogatepass').decode('utf16')
-#
-#     keyboard = [
-#         [InlineKeyboardButton(str(value), callback_data=str(key))]
-#         for key, value in buttons.items()
-#     ]
-#     reply_markup = InlineKeyboardMarkup(keyboard)
-#     return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 # надсилає в чат фото
 async def send_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, name: str) -> Message:
