@@ -7,4 +7,4 @@ TOKEN_TG = os.getenv('TOKEN_TG')
 TOKEN_GPT= os.getenv('TOKEN_GPT')
 PROXY_GPT = os.getenv('PROXY_GPT')
 
-LOG_FILE = f"log_call_{datetime.now().strftime('%Y-%m-%d')}.log"
+LOG_FILE = f"logs/log_call_{datetime.now().strftime('%Y-%m-%d')}.log"

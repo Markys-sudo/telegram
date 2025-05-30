@@ -1,19 +1,15 @@
 from config import TOKEN_GPT, TOKEN_TG, LOG_FILE
-import logging
+from logger import logger, gpt_logger, quiz_logger, dialog_logger
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from gpt import *
 from util import *
-
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import asyncio
 
 def log_user_action(update, text: str):
     user = update.effective_user or update.callback_query.from_user
     username = user.username or user.first_name or "Unknown"
     user_id = user.id
-    logger.info(f"[{user_id}] {username}: {text}")
-
+    dialog_logger.info(f"[{user_id}] {username}: {text}")
 
 async def start(update, context):
     dialog.mode = 'main'
@@ -25,6 +21,7 @@ async def start(update, context):
         'random': 'цікавий факт',
         'gpt' : 'розмова зі ШІ',
         'talk' : 'Діалог з відомою особистістю',
+        'quiz' : 'гра "Самий розумний"',
     })
     chatgpt.message_list.clear()
 
@@ -47,7 +44,6 @@ async def random_fact(update, context):
         error_text = f"⚠️ Виникла помилка при генерації факту: {e}"
         await send_text(update, context, error_text)
         log_user_action(update, f" — {error_text}")
-
 
 
 async def button_fact(update, context):
@@ -79,10 +75,7 @@ async def gpt(update, context):
 
 async def gpt_dialog(update, context):
     text = update.message.text if update.message and update.message.text else ''
-
-    log_user_action(update, f"написав: {text}")
-
-    # promt = load_prompt('gpt')
+    gpt_logger.info(f"[{update.effective_user.id}] GPT: {text}")
     answer = await chatgpt.add_message(text)
     await send_text(update, context, answer)
 
@@ -95,9 +88,7 @@ async def talk(update, context):
         'talk_mask': 'Ілон Маск',
         'talk_jobs': 'Стів Джобс',
         'talk_geyts': 'Біл Гейтс',
-
     })
-
 
 async def talk_button(update, context):
     callback = update.callback_query
@@ -107,7 +98,7 @@ async def talk_button(update, context):
     log_user_action(update, f"натиснув кнопку: {query_data}")
 
     await send_photo(update, context, query_data)
-    await send_text(update, context, 'Гарний вибір.')
+    await send_text(update, context, 'Гарний вибір...')
 
     promt = load_prompt(query_data)
     chatgpt.set_prompt(promt)
@@ -118,13 +109,139 @@ async def talk_dialog(update, context):
     text = update.message.text
     if not text:
         return
-
     log_user_action(update, f"написав у GPT-діалозі: {text}")
-
     my_msg = await send_text(update, context, 'Набирає повідомлення...')
     answer = await chatgpt.add_message(text)
     await my_msg.edit_text(answer)
 
+
+async def quiz(update, context):
+    dialog.mode = 'quiz'
+    context.user_data['quiz_score'] = 0  # Скидання балів
+    await send_photo(update, context, 'quiz')
+    msg = load_message('quiz')
+    await send_text_buttons(update, context, msg, {
+        'quiz_science': 'Наука і технології',
+        'quiz_world': 'Світ навколо нас',
+        'quiz_culture': 'Культура та мистецтво',
+        'quiz_history': 'Історія та сучасність',
+    })
+
+
+async def quiz_button(update, context):
+    callback = update.callback_query
+    query_data = callback.data
+    dialog.mode = 'quiz'
+
+    await callback.answer()
+    log_user_action(update, f"натиснув кнопку: {query_data}")
+
+    # Якщо користувач натиснув "Завершити"
+    if query_data == 'quiz_end':
+        score = context.user_data.get('quiz_score', 0)
+        await send_text(update, context, f"🏁 Вікторину завершено. Ваш результат: {score} правильних відповідей.")
+        return
+
+    # Надсилання фото
+    try:
+        await send_photo(update, context, query_data)
+    except FileNotFoundError:
+        await send_text(update, context, "⚠️ Зображення не знайдено.")
+
+    await send_text(update, context, '🎯 Ви обрали категорію. Переходимо до запитань!')
+
+    prompt = load_prompt(query_data)
+    context.user_data['quiz_prompt'] = prompt
+    context.user_data['quiz_score'] = 0
+
+    await ask_new_question(update, context, prompt)
+
+
+async def ask_new_question(update, context, prompt):
+    await send_text(update, context, "❓ Питання готується...")
+
+    raw_question = await chatgpt.send_question(prompt, "Згенеруй одне коротке питання українською мовою з 4 варіантами відповіді та чітко зазнач правильно відповідь. Формат обов’язковий:\n"
+"Питання: ...\nА) ...\nБ) ...\nВ) ...\nГ) ...\nПравильна відповідь: <лише одна літера А/Б/В/Г>"
+)
+
+    parsed = parse_quiz_question(raw_question)
+
+    if not parsed['question'] or len(parsed['options']) != 4 or not parsed['correct']:
+        await send_text(update, context, "⚠️ Сталася помилка при генерації питання. Спробуйте ще раз.")
+        return
+
+    context.user_data['quiz_correct'] = parsed['correct']
+    await send_text_buttons(update, context, parsed['question'], {
+        **parsed['options'],
+        'quiz_end': '🏁 Завершити'
+    })
+    #await send_text(update, context, f"🧪 Тестовий вивід GPT:\n\n{raw_question}")
+
+
+def parse_quiz_question(text: str) -> dict:
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    result = {
+        'question': '',
+        'options': {},
+        'correct': ''
+    }
+
+    option_map = {'А': 'quiz_A', 'Б': 'quiz_B', 'В': 'quiz_C', 'Г': 'quiz_D'}
+
+    for line in lines:
+        if line.lower().startswith("питання:"):
+            result['question'] = line.partition(':')[2].strip()
+        elif any(line.startswith(f"{k})") for k in option_map):
+            prefix = line[0]
+            key = option_map.get(prefix)
+            result['options'][key] = line[2:].strip()
+        elif "правильна відповідь" in line.lower():
+            letter = line.strip()[-1].upper()
+            result['correct'] = option_map.get(letter, '')
+
+    # Валідація
+    if not result['question'] or len(result['options']) != 4 or not result['correct']:
+        return {'question': '', 'options': {}, 'correct': ''}
+
+    return result
+
+async def quiz_answer(update, context):
+    callback = update.callback_query
+    answer = callback.data
+    correct = context.user_data.get('quiz_correct')
+    user_id = callback.from_user.id
+
+    await callback.answer()
+
+    if answer == 'quiz_end':
+        score = context.user_data.get('quiz_score', 0)
+        quiz_logger.info(f"[{user_id}] Завершив вікторину. Результат: {score}")
+        await send_text(update, context, f"🏁 Вікторину завершено. Ваш результат: {score} правильних відповідей.")
+        return
+
+    if not correct:
+        quiz_logger.warning(f"[{user_id}] Не вдалося перевірити відповідь.")
+        await send_text(update, context, "⚠️ Не вдалося перевірити відповідь. Спробуйте ще раз.")
+        return
+
+    if answer == correct:
+        context.user_data['quiz_score'] += 1
+        quiz_logger.info(f"[{user_id}] ✅ Правильно обрав: {answer}")
+        await send_text(update, context, "✅ Вірно!")
+    else:
+        correct_letter = correct[-1]
+        quiz_logger.info(f"[{user_id}] ❌ Неправильно. Обрав: {answer}, правильно: {correct}")
+        await send_text(update, context, f"❌ Невірно. Правильна відповідь: {correct_letter}")
+
+    await asyncio.sleep(1)
+    await send_text(update, context, "📚 Наступне питання готується...")
+
+    prompt = context.user_data.get('quiz_prompt')
+    if not prompt:
+        await send_text(update, context, "⚠️ Не обрано категорію вікторини. Натисніть /quiz для початку.")
+        return
+
+    await ask_new_question(update, context, prompt)
 
 
 async def dialog_mode(update, context):
@@ -135,6 +252,9 @@ async def dialog_mode(update, context):
         await random_fact(update, context)
     elif dialog.mode == 'talk':
         await talk_dialog(update, context)
+    elif dialog.mode == 'quiz':
+        await quiz(update, context)
+
 
 dialog = Dialog()
 dialog.mode = 'main'
@@ -145,9 +265,12 @@ app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('random', random_fact))
 app.add_handler(CommandHandler('gpt', gpt))
 app.add_handler(CommandHandler('talk', talk))
+app.add_handler(CommandHandler('quiz', quiz))
 
+app.add_handler(CallbackQueryHandler(quiz_answer, pattern="^quiz_[A-D]$"))
 app.add_handler(CallbackQueryHandler(button_fact, pattern="^fact_.*"))
 app.add_handler(CallbackQueryHandler(talk_button, pattern="^talk_.*"))
+app.add_handler(CallbackQueryHandler(quiz_button, pattern="^quiz_.*"))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), dialog_mode))
 
 if __name__ == '__main__':
