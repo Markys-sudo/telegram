@@ -1,6 +1,9 @@
 from config import PROXY_GPT
 from openai import AsyncOpenAI
 import httpx
+import base64
+import mimetypes
+
 
 
 class ChatGptService:
@@ -38,3 +41,26 @@ class ChatGptService:
             {"role": "user", "content": message_text}
         ]
         return await self.send_message_list()
+
+    async def describe_image(self, file_path: str, prompt: str = "Опиши, що зображено на цьому фото українською мовою.") -> str:
+        # Визначаємо MIME-тип (важливо для правильного формату запиту)
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = "image/jpeg"
+
+        # Читаємо і кодуємо зображення у base64
+        with open(file_path, "rb") as img_file:
+            b64_data = base64.b64encode(img_file.read()).decode("utf-8")
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}}
+                ]}
+            ],
+            max_tokens=800,
+        )
+
+        return response.choices[0].message.content

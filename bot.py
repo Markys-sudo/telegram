@@ -4,6 +4,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, CallbackQu
 from gpt import *
 from util import *
 import asyncio
+import os
 
 def log_user_action(update, text: str):
     user = update.effective_user or update.callback_query.from_user
@@ -22,6 +23,7 @@ async def start(update, context):
         'gpt' : 'розмова зі ШІ',
         'talk' : 'Діалог з відомою особистістю',
         'quiz' : 'гра "Самий розумний"',
+        'photo' : 'Компьютерний зір'
     })
     chatgpt.message_list.clear()
 
@@ -244,6 +246,36 @@ async def quiz_answer(update, context):
     await ask_new_question(update, context, prompt)
 
 
+async def photo_mode_start(update, context):
+    dialog.mode = 'photo'
+    await send_text(update, context, "📸 Надішліть мені зображення для обробки.")
+
+async def photo_handler(update, context):
+    if dialog.mode != 'photo':
+        await send_text(update, context, "📷 Зображення можна надсилати лише в режимі /photo.")
+        return
+
+    user = update.effective_user
+    photo = update.message.photo[-1]
+
+    file = await context.bot.get_file(photo.file_id)
+    os.makedirs("user_photos", exist_ok=True)
+    file_path = f"user_photos/{user.id}_{photo.file_id}.jpg"
+    await file.download_to_drive(file_path)
+
+    await send_text(update, context, "🧠 Аналізуємо зображення...")
+
+    try:
+        result = await chatgpt.describe_image(file_path)
+        await send_text(update, context, f"📷 GPT-4o каже: {result}")
+    except Exception as e:
+        await send_text(update, context, f"⚠️ Помилка аналізу GPT-4o: {e}")
+    dialog.mode = 'main'
+    asyncio.sleep(2)
+    await send_text(update, context, "🏠 Повертаємось до головного меню.")
+    await start(update, context)
+
+
 async def dialog_mode(update, context):
     if dialog.mode == 'gpt':
         await send_text(update, context, "GPT-mode " + update.message.from_user.name)
@@ -254,6 +286,8 @@ async def dialog_mode(update, context):
         await talk_dialog(update, context)
     elif dialog.mode == 'quiz':
         await quiz(update, context)
+    elif dialog.mode == 'photo':
+        await photo_handler(update, context)
 
 
 dialog = Dialog()
@@ -266,12 +300,15 @@ app.add_handler(CommandHandler('random', random_fact))
 app.add_handler(CommandHandler('gpt', gpt))
 app.add_handler(CommandHandler('talk', talk))
 app.add_handler(CommandHandler('quiz', quiz))
+app.add_handler(CommandHandler('photo', photo_mode_start))
+
 
 app.add_handler(CallbackQueryHandler(quiz_answer, pattern="^quiz_[A-D]$"))
 app.add_handler(CallbackQueryHandler(button_fact, pattern="^fact_.*"))
 app.add_handler(CallbackQueryHandler(talk_button, pattern="^talk_.*"))
 app.add_handler(CallbackQueryHandler(quiz_button, pattern="^quiz_.*"))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), dialog_mode))
+app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
 
 if __name__ == '__main__':
     app.run_polling()
