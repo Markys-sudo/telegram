@@ -21,19 +21,21 @@ class ChatGptService:
         self.message_list.append({"role": "system", "content": prompt_text})
 
     async def send_message_list(self) -> str:
-        completion = await self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model="gpt-4o",
             messages=self.message_list,
             max_tokens=3000,
             temperature=0.9
         )
-        message = completion.choices[0].message
-        self.message_list.append(message)
+        message = response.choices[0].message
+        # self.message_list.append(message)
         return message.content
 
     async def add_message(self, message_text: str) -> str:
         self.message_list.append({"role": "user", "content": message_text})
-        return await self.send_message_list()
+        reply = await self.send_message_list()
+        self.message_list.append({"role": "assistant", "content": reply})
+        return reply
 
     async def send_question(self, prompt_text: str, message_text: str) -> str:
         self.message_list = [
