@@ -77,10 +77,16 @@ async def gpt(update, context):
 
 async def gpt_dialog(update, context):
     text = update.message.text if update.message and update.message.text else ''
-    gpt_logger.info(f"[{update.effective_user.id}] GPT: {text}")
-    answer = await chatgpt.add_message(text)
-    await send_text(update, context, answer)
+    if not text:
+        return  # Пропускаємо порожнє повідомлення
 
+    gpt_logger.info(f"[{update.effective_user.id}] GPT: {text}")
+
+    try:
+        answer = await chatgpt.add_message(text)
+        await send_text(update, context, answer)
+    except Exception as e:
+        await send_text(update, context, f"⚠️ Виникла помилка при зверненні до GPT: {e}")
 
 async def talk(update, context):
     dialog.mode ='talk'
@@ -111,10 +117,19 @@ async def talk_dialog(update, context):
     text = update.message.text
     if not text:
         return
+
     log_user_action(update, f"написав у GPT-діалозі: {text}")
-    my_msg = await send_text(update, context, 'Набирає повідомлення...')
-    answer = await chatgpt.add_message(text)
-    await my_msg.edit_text(answer)
+
+    # Відправка тимчасового повідомлення
+    my_msg = await send_text(update, context, '✍️ Набираємо відповідь...')
+
+    try:
+        answer = await chatgpt.add_message(text)
+        # Редагування попереднього повідомлення
+        await my_msg.edit_text(answer)
+    except Exception as e:
+        # Якщо GPT-4o впав — повідомляємо
+        await my_msg.edit_text(f"⚠️ Виникла помилка при зверненні до GPT:\n{e}")
 
 
 async def quiz(update, context):
@@ -271,7 +286,8 @@ async def photo_handler(update, context):
     except Exception as e:
         await send_text(update, context, f"⚠️ Помилка аналізу GPT-4o: {e}")
     dialog.mode = 'main'
-    asyncio.sleep(2)
+
+    await asyncio.sleep(2)
     await send_text(update, context, "🏠 Повертаємось до головного меню.")
     await start(update, context)
 
