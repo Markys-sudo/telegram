@@ -2,6 +2,9 @@
 import logging
 import sys
 from config import LOG_FILE
+import os
+
+os.makedirs('logs', exist_ok=True)
 
 LOG_FILE = LOG_FILE
 
