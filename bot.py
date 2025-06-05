@@ -1,4 +1,5 @@
 from config import TOKEN_GPT, TOKEN_TG, LOG_FILE
+from db import save_user, add_favorite, get_favorites
 from logger import logger, gpt_logger, quiz_logger, dialog_logger
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from gpt import *
@@ -23,7 +24,9 @@ async def start(update, context):
         'gpt' : 'розмова зі ШІ',
         'talk' : 'Діалог з відомою особистістю',
         'quiz' : 'гра "Самий розумний"',
-        'photo' : 'Компьютерний зір'
+        'photo' : 'Компьютерний зір',
+        'recept': 'Кулінарний помічник',
+
     })
     chatgpt.message_list.clear()
 
@@ -131,7 +134,7 @@ async def talk_dialog(update, context):
         # Якщо GPT-4o впав — повідомляємо
         await my_msg.edit_text(f"⚠️ Виникла помилка при зверненні до GPT:\n{e}")
 
-
+#quiz
 async def quiz(update, context):
     dialog.mode = 'quiz'
     context.user_data['quiz_score'] = 0  # Скидання балів
@@ -143,7 +146,6 @@ async def quiz(update, context):
         'quiz_culture': 'Культура та мистецтво',
         'quiz_history': 'Історія та сучасність',
     })
-
 
 async def quiz_button(update, context):
     callback = update.callback_query
@@ -173,7 +175,6 @@ async def quiz_button(update, context):
 
     await ask_new_question(update, context, prompt)
 
-
 async def ask_new_question(update, context, prompt):
     await send_text(update, context, "❓ Питання готується...")
 
@@ -193,7 +194,6 @@ async def ask_new_question(update, context, prompt):
         'quiz_end': '🏁 Завершити'
     })
     #await send_text(update, context, f"🧪 Тестовий вивід GPT:\n\n{raw_question}")
-
 
 def parse_quiz_question(text: str) -> dict:
     lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
@@ -260,7 +260,7 @@ async def quiz_answer(update, context):
 
     await ask_new_question(update, context, prompt)
 
-
+#photo
 async def photo_mode_start(update, context):
     dialog.mode = 'photo'
     await send_text(update, context, "📸 Надішліть мені зображення для обробки.")
@@ -291,6 +291,88 @@ async def photo_handler(update, context):
     await send_text(update, context, "🏠 Повертаємось до головного меню.")
     await start(update, context)
 
+#recept
+async def recept(update, context):
+
+    user = update.effective_user
+    save_user(user)  # Зберегти користувача
+
+    dialog.mode ='recept'
+
+    await send_photo(update, context,'recept')
+
+    msg = load_message('recept')
+    await send_text(update, context, msg)
+
+async def recept_button(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    log_user_action(update, f"натиснув: {query}")
+
+    if query.data == 'recept_next':
+        ingredients = context.user_data.get('ingredients', '')
+        promt = load_prompt('recept')
+        promt_filled = promt.format(ingredients=ingredients)
+        chatgpt.set_prompt(promt_filled)
+        answer = await chatgpt.send_message_list()
+
+        await send_text_buttons(update, context, answer, {
+            "recept_next": 'Ще рецепти',
+            "recept_save": '📌 Додати в обране',
+            "recept_favorites": '🍴 Мої обрані рецепти',
+            "recept_end": 'Закінчити'
+        })
+    elif query.data == 'recept_save':
+        user_id = query.from_user.id
+        recipe_text = query.message.text
+        add_favorite(user_id, recipe_text)
+        await send_text(update, context, "✅ Рецепт додано до обраного!")
+
+    elif query.data == 'recept_favorites':
+        await favorites(update, context)  # той самий хендлер, що і для /favorites
+
+    elif query.data == 'recept_end':
+        await start(update, context)  # той самий хендлер, що і для /start
+
+
+async def recept_dialog(update, context):
+    if dialog.mode != 'recept':
+        return
+    text = update.message.text if update.message and update.message.text else ''
+    if not text:
+        return  # Пропускаємо порожнє повідомлення
+
+    context.user_data['ingredients'] = text
+    chatgpt.message_list.clear()
+
+    gpt_logger.info(f"[{update.effective_user.id}] GPT: {text}")
+
+    try:
+        promt_template = load_prompt('recept')
+        promt = promt_template.format(ingredients=text)
+        chatgpt.set_prompt(promt)  # просто встановлюємо prompt
+        answer = await chatgpt.send_message_list()  # отримуємо відповідь GPT
+        await send_text_buttons(update, context, answer, {
+            "recept_next": 'Ще рецепти',
+            "recept_save": '📌 Додати в обране',
+            "recept_favorites": '🍴 Мої обрані рецепти',
+            "recept_end": 'Закінчити'
+        })
+
+    except Exception as e:
+        await send_text(update, context, f"⚠️ Виникла помилка при зверненні до GPT: {e}")
+
+async def favorites(update, context):
+    user_id = update.effective_user.id
+    favs = get_favorites(user_id)
+    if not favs:
+        await send_text(update, context, "📭 У вас ще немає збережених рецептів.")
+    else:
+        await send_text(update, context, "📚 Ваші улюблені рецепти:")
+        for recipe in favs:
+            await send_text(update, context, recipe)
+
 
 async def dialog_mode(update, context):
     if dialog.mode == 'gpt':
@@ -301,10 +383,12 @@ async def dialog_mode(update, context):
     elif dialog.mode == 'talk':
         await talk_dialog(update, context)
     elif dialog.mode == 'quiz':
-        await quiz(update, context)
+        await send_text(update, context, "✋ Надішліть відповідь, натиснувши одну з кнопок.")
+
     elif dialog.mode == 'photo':
         await photo_handler(update, context)
-
+    elif dialog.mode == 'recept':
+        await recept_dialog(update, context)
 
 dialog = Dialog()
 dialog.mode = 'main'
@@ -317,12 +401,15 @@ app.add_handler(CommandHandler('gpt', gpt))
 app.add_handler(CommandHandler('talk', talk))
 app.add_handler(CommandHandler('quiz', quiz))
 app.add_handler(CommandHandler('photo', photo_mode_start))
+app.add_handler(CommandHandler('recept', recept))
+app.add_handler(CommandHandler('favorites', favorites))
 
 
 app.add_handler(CallbackQueryHandler(quiz_answer, pattern="^quiz_[A-D]$"))
 app.add_handler(CallbackQueryHandler(button_fact, pattern="^fact_.*"))
 app.add_handler(CallbackQueryHandler(talk_button, pattern="^talk_.*"))
 app.add_handler(CallbackQueryHandler(quiz_button, pattern="^quiz_.*"))
+app.add_handler(CallbackQueryHandler(recept_button, pattern="^recept_.*"))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), dialog_mode))
 app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
 
