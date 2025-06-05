@@ -3,27 +3,26 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-
-# конвертує об'єкт user в рядок
-def dialog_user_info_to_str(user) -> str:
-    result = ""
-    map = {"name": "Ім'я", "sex": "Стать", "age": "Вік", "city": "Місто", "occupation": "Професія", "hobby": "Хобі", "goals": "Цілі знайомства",
-           "handsome": "Краса, привабливість у балах (максимум 10 балів)", "wealth": "Доход, багатство", "annoys": "У людях дратує"}
-    for key, name in map.items():
-        if key in user:
-            result += name + ": " + user[key] + "\n"
-    return result
-
-
 # надсилає в чат текстове повідомлення
 async def send_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> Message:
+    # Перевірка на помилковий markdown
     if text.count('_') % 2 != 0:
-        message = f"Рядок '{text}' є невалідним з погляду markdown. Скористайтеся методом send_html()"
-        print(message)
-        return await update.message.reply_text(message)
-    
+        warning = f"Рядок '{text}' є невалідним з погляду Markdown. Скористайтеся методом send_html()."
+        print(warning)
+        text = warning
+
+    # Уникаємо проблем з юнікодом
     text = text.encode('utf16', errors='surrogatepass').decode('utf16')
-    return await context.bot.send_message(chat_id=update.effective_chat.id, text=text, parse_mode=ParseMode.MARKDOWN)
+
+    # Визначаємо об'єкт повідомлення для відповіді
+    if update.message:
+        return await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    elif update.callback_query and update.callback_query.message:
+        return await update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    else:
+        # На крайній випадок — надсилаємо через context.bot
+        return await context.bot.send_message(chat_id=update.effective_chat.id, text=text, parse_mode=ParseMode.MARKDOWN)
+
 
 # надсилає в чат html-повідомлення
 async def send_html(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> Message:
@@ -50,19 +49,6 @@ async def send_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         raise ValueError("Немає повідомлення, куди можна відповісти.")
 
-# async def send_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, buttons: dict) -> Message:
-#     if not isinstance(text, str):
-#         text = str(text)  # гарантуємо, що це рядок
-#
-#     # Можеш прибрати кодування, якщо воно не критичне
-#     # text = text.encode('utf16', errors='surrogatepass').decode('utf16')
-#
-#     keyboard = [
-#         [InlineKeyboardButton(str(value), callback_data=str(key))]
-#         for key, value in buttons.items()
-#     ]
-#     reply_markup = InlineKeyboardMarkup(keyboard)
-#     return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 # надсилає в чат фото
 async def send_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, name: str) -> Message:

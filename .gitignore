@@ -185,3 +185,8 @@ cython_debug/
 /resources/images/date_hardy.jpg
 /resources/images/avatar_main.jpg
 /resources/images/date_grande.jpg
+
+/other/
+/user_photos/*.jpg
+/bot.db
+/TinderBolt-v3/
