@@ -1,5 +1,5 @@
 from config import TOKEN_GPT, TOKEN_TG, LOG_FILE
-from db import save_user, add_favorite, get_favorites
+from db import save_user, add_favorite, get_favorites, add_quiz_top, get_top_users, get_user_rank
 from logger import logger, gpt_logger, quiz_logger, dialog_logger
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from gpt import *
@@ -185,7 +185,9 @@ async def ask_new_question(update, context, prompt):
     parsed = parse_quiz_question(raw_question)
 
     if not parsed['question'] or len(parsed['options']) != 4 or not parsed['correct']:
-        await send_text(update, context, "⚠️ Сталася помилка при генерації питання. Спробуйте ще раз.")
+        await send_text(update, context,
+                        "⚠️ Сталася помилка при генерації питання. Спробуйте ще раз або оберіть іншу категорію.")
+        await quiz(update, context)
         return
 
     context.user_data['quiz_correct'] = parsed['correct']
@@ -232,8 +234,17 @@ async def quiz_answer(update, context):
 
     if answer == 'quiz_end':
         score = context.user_data.get('quiz_score', 0)
-        quiz_logger.info(f"[{user_id}] Завершив вікторину. Результат: {score}")
-        await send_text(update, context, f"🏁 Вікторину завершено. Ваш результат: {score} правильних відповідей.")
+        user = callback.from_user
+
+        # Зберігаємо результат
+        add_quiz_top(user, score)
+
+        # Отримуємо позицію користувача
+        rank, total = get_user_rank(user.id)
+        quiz_logger.info(f"[{user_id}] Завершив вікторину. Результат: {score}, місце: {rank}/{total}")
+
+        msg = f"🏁 Вікторину завершено.\nВаш результат: {score} правильних відповідей.\n📊 Ваш рейтинг: {rank}-е місце з {total} учасників."
+        await send_text(update, context, msg)
         return
 
     if not correct:
