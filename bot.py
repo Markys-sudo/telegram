@@ -151,6 +151,7 @@ async def quiz_button(update, context):
     callback = update.callback_query
     query_data = callback.data
     dialog.mode = 'quiz'
+    user_id = callback.from_user.id
 
     await callback.answer()
     log_user_action(update, f"натиснув кнопку: {query_data}")
@@ -158,9 +159,18 @@ async def quiz_button(update, context):
     # Якщо користувач натиснув "Завершити"
     if query_data == 'quiz_end':
         score = context.user_data.get('quiz_score', 0)
-        await send_text(update, context, f"🏁 Вікторину завершено. Ваш результат: {score} правильних відповідей.")
-        return
+        user = callback.from_user
 
+        # Зберігаємо результат
+        add_quiz_top(user, score)
+
+        # Отримуємо позицію користувача
+        rank, total = get_user_rank(user.id)
+        quiz_logger.info(f"[{user_id}] Завершив вікторину. Результат: {score}, місце: {rank}/{total}")
+
+        msg = f"🏁 Вікторину завершено.\nВаш результат: {score} правильних відповідей.\n📊 Ваш рейтинг: {rank}-е місце з {total} учасників."
+        await send_text(update, context, msg)
+        return
     # Надсилання фото
     try:
         await send_photo(update, context, query_data)
@@ -231,21 +241,6 @@ async def quiz_answer(update, context):
     user_id = callback.from_user.id
 
     await callback.answer()
-
-    if answer == 'quiz_end':
-        score = context.user_data.get('quiz_score', 0)
-        user = callback.from_user
-
-        # Зберігаємо результат
-        add_quiz_top(user, score)
-
-        # Отримуємо позицію користувача
-        rank, total = get_user_rank(user.id)
-        quiz_logger.info(f"[{user_id}] Завершив вікторину. Результат: {score}, місце: {rank}/{total}")
-
-        msg = f"🏁 Вікторину завершено.\nВаш результат: {score} правильних відповідей.\n📊 Ваш рейтинг: {rank}-е місце з {total} учасників."
-        await send_text(update, context, msg)
-        return
 
     if not correct:
         quiz_logger.warning(f"[{user_id}] Не вдалося перевірити відповідь.")
@@ -345,7 +340,6 @@ async def recept_button(update, context):
 
     elif query.data == 'recept_end':
         await start(update, context)  # той самий хендлер, що і для /start
-
 
 async def recept_dialog(update, context):
     if dialog.mode != 'recept':
